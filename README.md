@@ -1,5 +1,23 @@
 # urban-fire-hazard
 
+Current:
+```
+urban-fire-hazard/
+├─ README.md
+├─ .gitignore
+├─ requirements.txt
+├─ data/
+│  ├─ raw/                      # LFB + meteorology (as downloaded)
+      ├─    
+      ├─    
+```
+
+
+
+
+
+
+Proposed: 
 ```
 urban-fire-hazard/
 ├─ README.md
