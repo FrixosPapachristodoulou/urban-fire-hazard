@@ -8,13 +8,9 @@ urban-fire-hazard/
 ├─ requirements.txt
 ├─ data/
 │  ├─ raw/                      # LFB + meteorology (as downloaded)
-      ├─    
-      ├─    
+      ├─ lfb_fire_data/    
+      ├─ metoffice_midas/   
 ```
-
-
-
-
 
 
 Proposed: 
