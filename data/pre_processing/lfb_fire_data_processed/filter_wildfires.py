@@ -13,9 +13,9 @@ import pandas as pd
 import re
 
 # ==== CONFIG ====
-INPUT_CSV = "raw/lbf_fire_data/lfb_incident_data_2009_1.csv"
-OUT_INCIDENTS = "pre_processing/lfb_fire_data_processed/lfb_wildfires.csv"
-OUT_DAILY = "pre_processing/lfb_fire_data_processed/lfb_wildfires_daily.csv"
+INPUT_CSV = "data/raw/lfb_fire_data/lfb_incident_data_2024.csv"
+OUT_INCIDENTS = "data/pre_processing/lfb_fire_data_processed/lfb_wildfires_2024.csv"
+OUT_DAILY = "data/pre_processing/lfb_fire_data_processed/lfb_wildfires_daily_2024.csv"
 
 # Columns from your file we need for filtering/grouping
 DATE_COL = "DateOfCall"
@@ -60,13 +60,15 @@ include_terms = [
     r"\b(wood(land)?|forest)\b",
     r"\bwaste ?land\b",
     r"\b(open ?land)\b",
-    r"\b(park|common)\b",
+    r"\bparks?\b",            # <— tightened
+    r"\bcommon land\b",       # <— tightened
     r"\b(field|crop(s)?)\b",
     r"\bstraw/?stubble burning\b",
     r"\ballotment(s)?\b",
     r"\bheath(land)?\b",
     r"\bmoor(s)?\b",
 ]
+
 inc_re = re.compile("|".join(include_terms), flags=re.IGNORECASE)
 
 # 4) non-wildfire outdoor terms to EXCLUDE
@@ -83,7 +85,17 @@ exclude_terms = [
     r"\b(equipment|machinery)\b",
     r"\b(lake|pond|reservoir)\b",
     r"\b(refuse/?rubbish tip)\b",
+    # New explicit bin-storage exclusions
+    r"\bbin(s)?\b",
+    r"\bbin storage\b",
+    r"\bbin store\b",
+    r"\bwheelie bin\b",
+    r"\brefuse storage\b",
+    r"\brefuse store\b",
+    r"\b(bin|refuse) (storage|store) area\b",
+    r"\b(common external bin storage area)\b",
 ]
+
 exc_re = re.compile("|".join(exclude_terms), flags=re.IGNORECASE)
 
 ptype = df[PTYPE_COL].fillna("")
