@@ -3,8 +3,8 @@ import pandas as pd
 
 # ===== CONFIGURATION =====
 BASE_DIR = Path("data/pre_processing/metoffice_midas_processed/uk-hourly-weather-obs_processed")
-INPUT_ROOT = BASE_DIR / "daily_by_year"
-OUTPUT_ROOT = BASE_DIR / "averaged_by_year"
+INPUT_ROOT = BASE_DIR / "2_daily_by_year"
+OUTPUT_ROOT = BASE_DIR / "3_averaged_by_year"
 
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 # =========================
@@ -84,6 +84,13 @@ def average_daily_across_stations(year: int):
 
     # Sort by date for neatness
     daily_out = daily_out.sort_values("met_day").reset_index(drop=True)
+
+    # 🔹 Round all float columns to 3 decimal places
+    float_cols = daily_out.select_dtypes(include="float").columns
+    daily_out[float_cols] = daily_out[float_cols].round(3)
+
+    # Optionally ensure met_day is written as YYYY-MM-DD (no time)
+    daily_out["met_day"] = daily_out["met_day"].dt.date
 
     # Save
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
