@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 
 # ==== CONFIGURATION ====
-YEAR = "2009"
+YEAR = "2024"
 INPUT_DIR = Path(f"data/pre_processing/metoffice_midas_processed/uk-daily-temperature-obs_processed/{YEAR}")
 OUTPUT_FILE = Path(f"data/pre_processing/metoffice_midas_processed/averaged/daily_temperature_averaged_{YEAR}.csv")
 
