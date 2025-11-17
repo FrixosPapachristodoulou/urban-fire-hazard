@@ -19,8 +19,8 @@ STATIONS = [
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 
 BASE_DIR = Path("data/pre_processing/metoffice_midas_processed/uk-hourly-weather-obs_processed")
-INPUT_ROOT = BASE_DIR / "cleaned_by_year"
-OUTPUT_ROOT = BASE_DIR / "daily_by_year"
+INPUT_ROOT = BASE_DIR / "1_cleaned_by_year"
+OUTPUT_ROOT = BASE_DIR / "2_daily_by_year"
 # ========================
 
 
@@ -56,42 +56,33 @@ def aggregate_hourly_to_daily(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["ob_time"])
     df["date"] = df["ob_time"].dt.date
 
+    # Compute hourly VPD
+    # --------------------------------------------
+    T = pd.to_numeric(df["air_temperature"], errors="coerce")
+    RH = pd.to_numeric(df["rltv_hum"], errors="coerce")
+
+    esat = 610.7 * (10 ** (7.5 * T / (237.3 + T)))
+    phi = RH / 100.0
+    df["VPD_hourly"] = esat * (1 - phi)
+    # --------------------------------------------
+
     # Convert numeric columns
     numeric_main = [
-        "air_temperature",
-        "dewpoint",
-        "wetb_temp",
-        "rltv_hum",
-        "msl_pressure",
-        "stn_pres",
-        "alt_pres",
-        "wind_speed",
-        "visibility",
-        "q10mnt_mxgst_spd",
-        "cs_hr_sun_dur",
-        "wmo_hr_sun_dur",
-        "drv_hr_sun_dur",
-        "snow_depth",
-    ]
-    qc_cols = [
-        "air_temperature_q",
-        "dewpoint_q",
-        "wetb_temp_q",
-        "msl_pressure_q",
-        "stn_pres_q",
-        "alt_pres_q",
-        "wind_direction_q",
-        "wind_speed_q",
-        "visibility_q",
-        "q10mnt_mxgst_spd_q",
-        "cs_hr_sun_dur_q",
-        "wmo_hr_sun_dur_q",
-        "drv_hr_sun_dur_q",
-        "snow_depth_q",
-        "ground_state_id_q",
+        "air_temperature","dewpoint","wetb_temp","rltv_hum",
+        "msl_pressure","stn_pres","alt_pres","wind_speed",
+        "visibility","q10mnt_mxgst_spd",
+        "cs_hr_sun_dur","wmo_hr_sun_dur","drv_hr_sun_dur",
+        "snow_depth","VPD_hourly"
     ]
 
-    # Restrict lists to columns that actually exist
+    qc_cols = [
+        "air_temperature_q","dewpoint_q","wetb_temp_q","msl_pressure_q",
+        "stn_pres_q","alt_pres_q","wind_direction_q","wind_speed_q",
+        "visibility_q","q10mnt_mxgst_spd_q","cs_hr_sun_dur_q",
+        "wmo_hr_sun_dur_q","drv_hr_sun_dur_q","snow_depth_q",
+        "ground_state_id_q"
+    ]
+
     numeric_main = [c for c in numeric_main if c in df.columns]
     qc_cols = [c for c in qc_cols if c in df.columns]
 
@@ -99,13 +90,14 @@ def aggregate_hourly_to_daily(df: pd.DataFrame) -> pd.DataFrame:
         pd.to_numeric, errors="coerce"
     )
 
+    # Group
     group_cols = ["id", "src_id", "date"]
     if "id_type" in df.columns:
-        group_cols.insert(1, "id_type")  # id, id_type, src_id, date
+        group_cols.insert(1, "id_type")
 
     gb = df.groupby(group_cols, dropna=False)
 
-    # 1) Basic numeric aggregations via .agg with MultiIndex columns
+    # ---- Aggregation spec ----
     agg_spec = {}
 
     # Temperatures: mean/max/min
@@ -116,39 +108,28 @@ def aggregate_hourly_to_daily(df: pd.DataFrame) -> pd.DataFrame:
     if "wetb_temp" in df.columns:
         agg_spec["wetb_temp"] = ["mean", "max", "min"]
 
-    # Relative humidity: mean/max/min
     if "rltv_hum" in df.columns:
         agg_spec["rltv_hum"] = ["mean", "max", "min"]
 
-    # Pressure: mean
-    if "msl_pressure" in df.columns:
-        agg_spec["msl_pressure"] = ["mean"]
-    if "stn_pres" in df.columns:
-        agg_spec["stn_pres"] = ["mean"]
-    if "alt_pres" in df.columns:
-        agg_spec["alt_pres"] = ["mean"]
+    # Pressure means
+    for col in ["msl_pressure", "stn_pres", "alt_pres"]:
+        if col in df.columns:
+            agg_spec[col] = ["mean"]
 
-    # Wind speed: mean/max
+    # Wind, visibility, gust
     if "wind_speed" in df.columns:
         agg_spec["wind_speed"] = ["mean", "max"]
-
-    # Visibility: mean/min
     if "visibility" in df.columns:
         agg_spec["visibility"] = ["mean", "min"]
-
-    # Gust: max
     if "q10mnt_mxgst_spd" in df.columns:
         agg_spec["q10mnt_mxgst_spd"] = ["max"]
 
-    # Sunshine durations: sum
-    if "cs_hr_sun_dur" in df.columns:
-        agg_spec["cs_hr_sun_dur"] = ["sum"]
-    if "wmo_hr_sun_dur" in df.columns:
-        agg_spec["wmo_hr_sun_dur"] = ["sum"]
-    if "drv_hr_sun_dur" in df.columns:
-        agg_spec["drv_hr_sun_dur"] = ["sum"]
+    # Sunshine sums
+    for col in ["cs_hr_sun_dur","wmo_hr_sun_dur","drv_hr_sun_dur"]:
+        if col in df.columns:
+            agg_spec[col] = ["sum"]
 
-    # Snow depth: max
+    # Snow
     if "snow_depth" in df.columns:
         agg_spec["snow_depth"] = ["max"]
 
@@ -156,30 +137,50 @@ def aggregate_hourly_to_daily(df: pd.DataFrame) -> pd.DataFrame:
     for col in qc_cols:
         agg_spec[col] = ["max"]
 
+    # --- New: VPD hourly min/max/mean ---
+    agg_spec["VPD_hourly"] = ["mean", "max", "min"]
+    # ------------------------------------
+
+    # Run aggregation
     daily_main = gb.agg(agg_spec)
 
-    # Flatten MultiIndex columns: (var, stat) -> var_stat
+    # Flatten columns
     daily_main.columns = [
         f"{var}_{stat}" for var, stat in daily_main.columns.to_flat_index()
     ]
     daily_main = daily_main.reset_index()
 
-    # 2) Wind direction via circular mean
+    # Wind direction circular mean
     if "wind_direction" in df.columns:
         daily_dir = gb["wind_direction"].agg(circular_mean_deg).reset_index()
-        daily_dir = daily_dir.rename(columns={"wind_direction": "wind_direction_circmean"})
+        daily_dir = daily_dir.rename(columns={"wind_direction":"wind_direction_circmean"})
         daily_main = daily_main.merge(daily_dir, on=group_cols, how="left")
 
-    # 3) Ground state mode
+    # Ground state mode
     if "ground_state_id" in df.columns:
         daily_ground = gb["ground_state_id"].agg(ground_state_mode).reset_index()
-        daily_ground = daily_ground.rename(columns={"ground_state_id": "ground_state_id_mode"})
+        daily_ground = daily_ground.rename(columns={"ground_state_id":"ground_state_id_mode"})
         daily_main = daily_main.merge(daily_ground, on=group_cols, how="left")
 
-    # Rename date column for clarity
-    daily_main = daily_main.rename(columns={"date": "met_day"})
+    # Rename date → met_day
+    daily_main = daily_main.rename(columns={"date":"met_day"})
+
+    # Insert VPD_mean / VPD_max / VPD_min after met_day
+    daily_main.insert(
+        daily_main.columns.get_loc("met_day")+1,
+        "VPD_mean", daily_main["VPD_hourly_mean"]
+    )
+    daily_main.insert(
+        daily_main.columns.get_loc("met_day")+2,
+        "VPD_max", daily_main["VPD_hourly_max"]
+    )
+    daily_main.insert(
+        daily_main.columns.get_loc("met_day")+3,
+        "VPD_min", daily_main["VPD_hourly_min"]
+    )
 
     return daily_main
+
 
 
 def process_station_year(station: str, year: int) -> None:
