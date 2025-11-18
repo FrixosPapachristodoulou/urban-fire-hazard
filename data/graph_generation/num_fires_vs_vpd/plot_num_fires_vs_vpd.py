@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
-import statsmodels.api as sm
+import matplotlib.lines as mlines   # for custom legend entries
 
 # ==== CONFIGURATION ====
 BASE_DIR = Path("data/graph_generation/num_fires_vs_vpd")
@@ -37,46 +37,47 @@ def load_all_data() -> pd.DataFrame:
     return pd.concat(dfs, ignore_index=True)
 
 
-def fit_poisson_glm(vpd: np.ndarray, fires: np.ndarray):
+def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
     """
-    Fit a Poisson GLM:
+    Fit a power law:
 
-        log(E[NoF]) = beta0 + beta1 * log(VPD)
+        NoF = a * VPD^b
 
-    which is equivalent to:
+    by doing linear regression in log–log space:
 
-        E[NoF] = a * VPD^b
+        ln(NoF) = ln(a) + b * ln(VPD)
 
-    Returns a, b, pseudo_R2, results_object.
+    Returns a, b, R2.
     """
-    # Use only positive VPD (log defined)
-    mask = vpd > 0
+    vpd = np.asarray(vpd, dtype=float)
+    fires = np.asarray(fires, dtype=float)
+
+    # need positive values for the logs
+    mask = (vpd > 0) & (fires > 0)
     x = vpd[mask]
-    y = fires[mask].astype(float)
+    y = fires[mask]
 
     if len(x) < 2:
-        raise RuntimeError("Not enough positive data points for Poisson GLM fit.")
+        raise RuntimeError("Not enough positive data points for power law fit.")
 
-    log_vpd = np.log(x)
-    X = sm.add_constant(log_vpd)
+    log_x = np.log(x)
+    log_y = np.log(y)
 
-    model = sm.GLM(y, X, family=sm.families.Poisson())
-    results = model.fit()
+    # ordinary least squares in log space
+    b, log_a = np.polyfit(log_x, log_y, 1)
+    a = np.exp(log_a)
 
-    beta0, beta1 = results.params  # intercept, slope
+    # compute R^2 in log space
+    y_pred_log = log_a + b * log_x
+    ss_res = np.sum((log_y - y_pred_log) ** 2)
+    ss_tot = np.sum((log_y - np.mean(log_y)) ** 2)
+    r2 = 1.0 - ss_res / ss_tot
 
-    # Convert to power-law parameters
-    a = np.exp(beta0)
-    b = beta1
-
-    # Pseudo-R^2 based on deviance
-    pseudo_r2 = 1.0 - results.deviance / results.null_deviance
-
-    return a, b, pseudo_r2, results
+    return a, b, r2
 
 
 def plot_fires_vs_vpd(df: pd.DataFrame):
-    # Determine colours by season
+    # determine colours by season
     df["season"] = df["met_day"].apply(
         lambda d: "summer" if is_spring_summer(d) else "winter"
     )
@@ -87,26 +88,24 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     vpd_all = df["VPD_mean"].values
     fires_all = df["fire_count"].values.astype(float)
 
-    # ---- Fit Poisson GLM: log(E[NoF]) = beta0 + beta1 * log(VPD) ----
-    a_glm, b_glm, pseudo_r2, glm_results = fit_poisson_glm(vpd_all, fires_all)
-    print(glm_results.summary())
+    # ---- Fit power law: NoF = a * VPD^b ----
+    a_pl, b_pl, r2 = fit_power_law(vpd_all, fires_all)
     print(
-        f"\nPoisson GLM (log link): E[NoF] = {a_glm:.3g} * VPD^{b_glm:.3f}, "
-        f"pseudo-R^2 = {pseudo_r2:.3f}"
+        f"Power law fit: NoF = {a_pl:.3g} * VPD^{b_pl:.3f}, R^2 = {r2:.3f}"
     )
 
-    # X-range for plotting the GLM fit curve
+    # x range for plotting the power law curve
     vpd_pos = vpd_all[vpd_all > 0]
     vpd_min = np.nanmin(vpd_pos)
     vpd_max = np.nanmax(vpd_pos)
     vpd_fit = np.linspace(vpd_min, vpd_max, 300)
-    fires_fit_glm = a_glm * vpd_fit ** b_glm
+    fires_fit = a_pl * vpd_fit ** b_pl
 
     # ---- Plot ----
-    plt.figure(figsize=(8, 8))  # square
+    fig, ax = plt.subplots(figsize=(8, 8))  # square
 
-    # Winter = blue
-    plt.scatter(
+    # winter = blue
+    ax.scatter(
         winter_df["VPD_mean"],
         winter_df["fire_count"],
         color="blue",
@@ -115,8 +114,8 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
         label="Autumn/Winter (Sep–Feb)",
     )
 
-    # Summer = red
-    plt.scatter(
+    # summer = red
+    ax.scatter(
         summer_df["VPD_mean"],
         summer_df["fire_count"],
         color="red",
@@ -125,54 +124,63 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
         label="Spring/Summer (Mar–Aug)",
     )
 
-    # Poisson GLM fit curve (black)
-    plt.plot(
+    # power law fit curve (black)
+    ax.plot(
         vpd_fit,
-        fires_fit_glm,
+        fires_fit,
         color="black",
         linewidth=2,
-        label="Poisson GLM fit",
+        label="Power law fit",
     )
 
-    # Titles + labels
-    plt.title("Daily Wildfires vs VPD (London, 2009–2024)", fontsize=14)
-    plt.xlabel("VPD_mean (Pa)", fontsize=12)
-    plt.ylabel("Daily Wildfire Count", fontsize=12)
+    # titles and labels
+    ax.set_title("Daily Wildfires vs VPD (London, 2009–2024)", fontsize=14)
+    ax.set_xlabel("VPD_mean (Pa)", fontsize=12)
+    ax.set_ylabel("Daily Wildfire Count", fontsize=12)
 
-    # Text box with power-law form and pseudo-R^2
-    eq_text = (
-        f"E[NoF] = {a_glm:.2g} · VPD$^{{{b_glm:.2f}}}$\n"
-        f"Poisson pseudo-$R^2$ = {pseudo_r2:.2f}"
-    )
-    ax = plt.gca()
-    ax.text(
-        0.05,
-        0.95,
-        eq_text,
-        transform=ax.transAxes,
-        va="top",
-        ha="left",
-        fontsize=11,
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    # add equation and R^2 into the legend
+    glm_label = (
+        f"NoF = {a_pl:.2g} · VPD$^{{{b_pl:.2f}}}$\n"
+        f"$R^2$ = {r2:.2f}"
     )
 
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    dummy_handle = mlines.Line2D([], [], color="none")
+
+    ax.legend(
+        handles=[
+            mlines.Line2D([], [], color="blue", marker="o", linestyle="None",
+                          label="Autumn/Winter (Sep–Feb)"),
+            mlines.Line2D([], [], color="red", marker="o", linestyle="None",
+                          label="Spring/Summer (Mar–Aug)"),
+            mlines.Line2D([], [], color="black", label="Power law fit"),
+            dummy_handle,
+        ],
+        labels=[
+            "Autumn/Winter (Sep–Feb)",
+            "Spring/Summer (Mar–Aug)",
+            "Power law fit",
+            glm_label,
+        ],
+        loc="upper left",
+        framealpha=0.9,
+    )
+
+    ax.grid(True, alpha=0.3)
     plt.tight_layout()
 
-    # High-resolution PNG (same folder)
-    out_path = BASE_DIR / "fires_vs_vpd_scatter_poisson_glm.png"
+    # high resolution PNG (same folder)
+    out_path = BASE_DIR / "fires_vs_vpd_scatter_power_law.png"
     plt.savefig(out_path, dpi=400)
-    print(f"📈 Saved scatter + Poisson GLM fit to: {out_path} (1000 DPI)")
+    print(f"Saved scatter plus power law fit to: {out_path}")
 
     plt.show()
 
 
 def main():
-    print("📥 Loading merged weather + fire datasets...")
+    print("Loading merged weather and fire datasets...")
     df = load_all_data()
 
-    print("📊 Plotting fire_count vs VPD_mean with Poisson GLM fit...")
+    print("Plotting fire_count vs VPD_mean with power law fit...")
     plot_fires_vs_vpd(df)
 
 

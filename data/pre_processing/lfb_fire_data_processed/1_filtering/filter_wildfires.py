@@ -46,8 +46,7 @@ is_fire = df[GROUP_COL].str.strip().str.lower().eq("fire")
 
 # 2) outdoor categories (explicit + robust contains)
 outdoor_ok = (
-    df[PCAT_COL].isin(["Outdoor", "Outdoor Structure", "Other outdoor location"])
-    | df[PCAT_COL].str.contains("outdoor", case=False, na=False)
+    df[PCAT_COL].isin(["Outdoor"])
 )
 
 # 3) non-wildfire outdoor terms to EXCLUDE
@@ -61,7 +60,6 @@ exclude_terms = [
     r"\b(road surface|pavement|cycle path|footpath|bridleway|roadside)\b",
     r"\b(train station|airport|concourse|terminal)\b",
     r"\b(post box|kiosk)\b",
-    r"\b(equipment|machinery)\b",
     r"\b(lake|pond|reservoir)\b",
     r"\b(refuse/?rubbish tip)\b",
     # New explicit bin-storage exclusions
