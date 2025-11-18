@@ -12,10 +12,10 @@
 import pandas as pd
 import re
 
+
 # ==== CONFIG ====
 INPUT_CSV = "data/raw/lfb_fire_data/lfb_incident_data_2024.csv"
-OUT_INCIDENTS = "data/pre_processing/lfb_fire_data_processed/lfb_wildfires_2024.csv"
-OUT_DAILY = "data/pre_processing/lfb_fire_data_processed/lfb_wildfires_daily_2024.csv"
+OUT_INCIDENTS = "data/pre_processing/lfb_fire_data_processed/1_filtering/lfb_wildfires_2024.csv"
 
 # Columns from your file we need for filtering/grouping
 DATE_COL = "DateOfCall"
@@ -50,28 +50,7 @@ outdoor_ok = (
     | df[PCAT_COL].str.contains("outdoor", case=False, na=False)
 )
 
-# 3) vegetation/open-land terms to INCLUDE
-include_terms = [
-    r"vegetation(?!.*equipment)",
-    r"garden\b(?!.*equipment)",
-    r"\bgrass(es)?\b",
-    r"\bhedge(s)?\b",
-    r"\b(scrub ?land|tree scrub|scrub)\b",
-    r"\b(wood(land)?|forest)\b",
-    r"\bwaste ?land\b",
-    r"\b(open ?land)\b",
-    r"\bparks?\b",            # <— tightened
-    r"\bcommon land\b",       # <— tightened
-    r"\b(field|crop(s)?)\b",
-    r"\bstraw/?stubble burning\b",
-    r"\ballotment(s)?\b",
-    r"\bheath(land)?\b",
-    r"\bmoor(s)?\b",
-]
-
-inc_re = re.compile("|".join(include_terms), flags=re.IGNORECASE)
-
-# 4) non-wildfire outdoor terms to EXCLUDE
+# 3) non-wildfire outdoor terms to EXCLUDE
 exclude_terms = [
     r"\b(loose )?refuse\b",
     r"\brubbish\b",
@@ -99,16 +78,13 @@ exclude_terms = [
 exc_re = re.compile("|".join(exclude_terms), flags=re.IGNORECASE)
 
 ptype = df[PTYPE_COL].fillna("")
-incl_ptype = ptype.str.contains(inc_re)
 excl_ptype = ptype.str.contains(exc_re)
 
-# 5) BBQ-origin vegetation edge case (keep only if BBQ + vegetation both appear)
-bbq_veg = ptype.str.contains(r"\bbbq|barbecue\b", case=False, na=False) & ptype.str.contains(inc_re)
-
-# main mask: Fire + Outdoor + (Vegetation OR BBQ+Vegetation) + NOT in exclude list
-mask = is_fire & outdoor_ok & (incl_ptype | bbq_veg) & (~excl_ptype)
+# main mask: Fire + Outdoor + NOT in exclude list
+mask = is_fire & outdoor_ok & (~excl_ptype)
 
 wildfires = df[mask].copy()
+
 
 # ==== DIAGNOSTICS ====
 print(f"Total rows in input: {len(df)}")
@@ -123,19 +99,3 @@ print(wildfires[PCAT_COL].value_counts().head(10))
 incident_out = wildfires[original_cols].sort_values(DATE_COL)
 incident_out.to_csv(OUT_INCIDENTS, index=False)
 print(f"\n✅ Saved incident-level wildfires (all original columns) to: {OUT_INCIDENTS}")
-
-# ==== SAVE DAILY COUNTS ONLY ====
-# Since we are "just filtering", we produce a clean daily count table.
-daily = (
-    wildfires.groupby("__Date")
-    .size()
-    .to_frame("NumWildfires")
-    .reset_index()
-    .rename(columns={"__Date": "Date"})
-    .sort_values("Date")
-)
-daily.to_csv(OUT_DAILY, index=False)
-print(f"✅ Saved daily counts to: {OUT_DAILY}")
-
-print("\nSample of daily counts:")
-print(daily.head(10))
