@@ -41,27 +41,27 @@ def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
     """
     Fit a power law:
 
-        NoF = a * VPD^b
+        NoF + 1 = a * VPD^b
 
     by doing linear regression in log–log space:
 
-        ln(NoF) = ln(a) + b * ln(VPD)
+        ln(NoF + 1) = ln(a) + b * ln(VPD)
 
-    Returns a, b, R2.
+    Returns a, b, R2 (computed in log space).
     """
     vpd = np.asarray(vpd, dtype=float)
     fires = np.asarray(fires, dtype=float)
 
-    # need positive values for the logs
-    mask = (vpd > 0) & (fires > 0)
+    # need positive VPD for the log; keep ALL fire counts (including zeros)
+    mask = (vpd > 0) & ~np.isnan(fires)
     x = vpd[mask]
     y = fires[mask]
 
     if len(x) < 2:
-        raise RuntimeError("Not enough positive data points for power law fit.")
+        raise RuntimeError("Not enough data points for power law fit.")
 
     log_x = np.log(x)
-    log_y = np.log(y)
+    log_y = np.log(y + 1.0)   # <-- key change: include zero days
 
     # ordinary least squares in log space
     b, log_a = np.polyfit(log_x, log_y, 1)
@@ -76,6 +76,7 @@ def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
     return a, b, r2
 
 
+
 def plot_fires_vs_vpd(df: pd.DataFrame):
     # determine colours by season
     df["season"] = df["met_day"].apply(
@@ -88,10 +89,10 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     vpd_all = df["VPD_mean"].values
     fires_all = df["fire_count"].values.astype(float)
 
-    # ---- Fit power law: NoF = a * VPD^b ----
+    # ---- Fit power law: NoF + 1 = a * VPD^b ----
     a_pl, b_pl, r2 = fit_power_law(vpd_all, fires_all)
     print(
-        f"Power law fit: NoF = {a_pl:.3g} * VPD^{b_pl:.3f}, R^2 = {r2:.3f}"
+        f"Power law fit (NoF+1): NoF + 1 = {a_pl:.3g} * VPD^{b_pl:.3f}, R^2 = {r2:.3f}"
     )
 
     # x range for plotting the power law curve
@@ -99,7 +100,11 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     vpd_min = np.nanmin(vpd_pos)
     vpd_max = np.nanmax(vpd_pos)
     vpd_fit = np.linspace(vpd_min, vpd_max, 300)
-    fires_fit = a_pl * vpd_fit ** b_pl
+
+    # Back to original scale: NoF = a * VPD^b - 1
+    fires_fit = a_pl * vpd_fit ** b_pl - 1.0
+    fires_fit = np.clip(fires_fit, 0, None)
+
 
     # ---- Plot ----
     fig, ax = plt.subplots(figsize=(8, 8))  # square
@@ -143,6 +148,7 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
         f"NoF = {a_pl:.2g} · VPD$^{{{b_pl:.2f}}}$\n"
         f"$R^2$ = {r2:.2f}"
     )
+
 
     dummy_handle = mlines.Line2D([], [], color="none")
 
