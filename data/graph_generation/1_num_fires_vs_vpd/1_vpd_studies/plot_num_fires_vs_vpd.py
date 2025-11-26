@@ -6,7 +6,7 @@ from datetime import datetime
 import matplotlib.lines as mlines   # for custom legend entries
 
 # ==== CONFIGURATION ====
-BASE_DIR = Path("data/graph_generation/num_fires_vs_vpd")
+BASE_DIR = Path("data/graph_generation/1_num_fires_vs_vpd")
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 # =======================
 
@@ -61,7 +61,7 @@ def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
         raise RuntimeError("Not enough data points for power law fit.")
 
     log_x = np.log(x)
-    log_y = np.log(y + 1.0)   # <-- include zero days
+    log_y = np.log(y + 1.0)   # <-- key change: include zero days
 
     # ordinary least squares in log space
     b, log_a = np.polyfit(log_x, log_y, 1)
@@ -76,6 +76,7 @@ def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
     return a, b, r2
 
 
+
 def plot_fires_vs_vpd(df: pd.DataFrame):
     # determine colours by season
     df["season"] = df["met_day"].apply(
@@ -85,19 +86,17 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     summer_df = df[df["season"] == "summer"]
     winter_df = df[df["season"] == "winter"]
 
-    # === CHANGE 1: fit only on spring/summer (red dots) ===
-    vpd_summer = summer_df["VPD_mean"].values
-    fires_summer = summer_df["fire_count"].values.astype(float)
+    vpd_all = df["VPD_mean"].values
+    fires_all = df["fire_count"].values.astype(float)
 
     # ---- Fit power law: NoF + 1 = a * VPD^b ----
-    a_pl, b_pl, r2 = fit_power_law(vpd_summer, fires_summer)
+    a_pl, b_pl, r2 = fit_power_law(vpd_all, fires_all)
     print(
-        "Power law fit on SPRING/SUMMER only (NoF+1): "
-        f"NoF + 1 = {a_pl:.3g} * VPD^{b_pl:.3f}, R^2 = {r2:.3f}"
+        f"Power law fit (NoF+1): NoF + 1 = {a_pl:.3g} * VPD^{b_pl:.3f}, R^2 = {r2:.3f}"
     )
 
-    # === CHANGE 2: x range based on summer VPD only ===
-    vpd_pos = vpd_summer[vpd_summer > 0]
+    # x range for plotting the power law curve
+    vpd_pos = vpd_all[vpd_all > 0]
     vpd_min = np.nanmin(vpd_pos)
     vpd_max = np.nanmax(vpd_pos)
     vpd_fit = np.linspace(vpd_min, vpd_max, 300)
@@ -105,6 +104,7 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     # Back to original scale: NoF = a * VPD^b - 1
     fires_fit = a_pl * vpd_fit ** b_pl - 1.0
     fires_fit = np.clip(fires_fit, 0, None)
+
 
     # ---- Plot ----
     fig, ax = plt.subplots(figsize=(8, 8))  # square
@@ -135,7 +135,7 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
         fires_fit,
         color="black",
         linewidth=2,
-        label="Power law fit (spring/summer)",
+        label="Power law fit",
     )
 
     # titles and labels
@@ -146,8 +146,9 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     # add equation and R^2 into the legend
     glm_label = (
         f"NoF = {a_pl:.2g} · VPD$^{{{b_pl:.2f}}}$\n"
-        f"$R^2$ = {r2:.2f} (spring/summer)"
+        f"$R^2$ = {r2:.2f}"
     )
+
 
     dummy_handle = mlines.Line2D([], [], color="none")
 
@@ -157,13 +158,13 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
                           label="Autumn/Winter (Sep–Feb)"),
             mlines.Line2D([], [], color="red", marker="o", linestyle="None",
                           label="Spring/Summer (Mar–Aug)"),
-            mlines.Line2D([], [], color="black", label="Power law fit (spring/summer)"),
+            mlines.Line2D([], [], color="black", label="Power law fit"),
             dummy_handle,
         ],
         labels=[
             "Autumn/Winter (Sep–Feb)",
             "Spring/Summer (Mar–Aug)",
-            "Power law fit (spring/summer)",
+            "Power law fit",
             glm_label,
         ],
         loc="upper left",
@@ -174,7 +175,7 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     plt.tight_layout()
 
     # high resolution PNG (same folder)
-    out_path = BASE_DIR / "only_s_s_fires_vs_vpd_scatter_power_law.png"
+    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_scatter_power_law.png"
     plt.savefig(out_path, dpi=400)
     print(f"Saved scatter plus power law fit to: {out_path}")
 

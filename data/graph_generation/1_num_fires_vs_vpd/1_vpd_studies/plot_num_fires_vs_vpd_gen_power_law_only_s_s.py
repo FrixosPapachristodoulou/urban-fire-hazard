@@ -6,7 +6,7 @@ from datetime import datetime
 import matplotlib.lines as mlines   # for custom legend entries
 
 # ==== CONFIGURATION ====
-BASE_DIR = Path("data/graph_generation/num_fires_vs_vpd")
+BASE_DIR = Path("data/graph_generation/1_num_fires_vs_vpd")
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 
 # Range of exponent c in NoF = a * exp(b * VPD^c)
@@ -226,7 +226,7 @@ def plot_fires_vs_vpd(df: pd.DataFrame):
     plt.tight_layout()
 
     # high resolution PNG (same folder)
-    out_path = BASE_DIR / "only_s_s_fires_vs_vpd_scatter_gen_exp_best_c.png"
+    out_path = BASE_DIR / "1_vpd_studies/only_s_s_fires_vs_vpd_scatter_gen_exp_best_c.png"
     plt.savefig(out_path, dpi=400)
     print(f"\nSaved scatter plus generalised exponential fit to: {out_path}")
 
