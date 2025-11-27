@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
-import matplotlib.lines as mlines
 
 # ==== CONFIGURATION ====
 BASE_DIR = Path("data/graph_generation/1_num_fires_vs_vpd")
@@ -37,134 +36,173 @@ def load_all_data() -> pd.DataFrame:
     return pd.concat(dfs, ignore_index=True)
 
 
-def compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma, threshold_percentile=70):
-    """Compute R² for low and high FIRE COUNT regimes separately."""
+def compute_r2_by_vpd_regime(
+    vpd: np.ndarray,
+    fires: np.ndarray,
+    alpha: float,
+    beta: float,
+    gamma: float,
+    p1: float = 33.3,
+    p2: float = 66.7,
+):
+    """
+    Compute R² overall and within three VPD regimes:
+      - low VPD (0 to p1 percentile)
+      - mid VPD (p1 to p2 percentile)
+      - high VPD (p2 to 100 percentile)
+
+    Uses log-space residuals, consistent with the fit.
+    """
     mask = (vpd > 0) & ~np.isnan(fires)
     x = vpd[mask]
     y = fires[mask]
-    
+
     log_x = np.log(x)
     log_y = np.log(y + 1.0)
-    
-    # Threshold based on FIRE COUNT, not VPD
-    fire_threshold = np.percentile(y, threshold_percentile)
+
+    # Predicted log fires
     y_pred = alpha + beta * log_x + gamma * (log_x ** 2)
-    
-    # Overall
+
+    # Overall R²
     ss_res = np.sum((log_y - y_pred) ** 2)
     ss_tot = np.sum((log_y - np.mean(log_y)) ** 2)
-    r2_overall = 1.0 - ss_res / ss_tot
-    
-    # Low fire count days
-    low_mask = y <= fire_threshold
+    r2_all = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    # Define VPD regime boundaries
+    vpd_low_thr = np.percentile(x, p1)
+    vpd_high_thr = np.percentile(x, p2)
+
+    # Low VPD regime
+    low_mask = x <= vpd_low_thr
     if np.sum(low_mask) > 2:
         ss_res_low = np.sum((log_y[low_mask] - y_pred[low_mask]) ** 2)
         ss_tot_low = np.sum((log_y[low_mask] - np.mean(log_y[low_mask])) ** 2)
         r2_low = 1.0 - ss_res_low / ss_tot_low if ss_tot_low > 0 else np.nan
     else:
         r2_low = np.nan
-    
-    # High fire count days (the dangerous ones!)
-    high_mask = y > fire_threshold
+
+    # Mid VPD regime
+    mid_mask = (x > vpd_low_thr) & (x <= vpd_high_thr)
+    if np.sum(mid_mask) > 2:
+        ss_res_mid = np.sum((log_y[mid_mask] - y_pred[mid_mask]) ** 2)
+        ss_tot_mid = np.sum((log_y[mid_mask] - np.mean(log_y[mid_mask])) ** 2)
+        r2_mid = 1.0 - ss_res_mid / ss_tot_mid if ss_tot_mid > 0 else np.nan
+    else:
+        r2_mid = np.nan
+
+    # High VPD regime
+    high_mask = x > vpd_high_thr
     if np.sum(high_mask) > 2:
         ss_res_high = np.sum((log_y[high_mask] - y_pred[high_mask]) ** 2)
         ss_tot_high = np.sum((log_y[high_mask] - np.mean(log_y[high_mask])) ** 2)
         r2_high = 1.0 - ss_res_high / ss_tot_high if ss_tot_high > 0 else np.nan
     else:
         r2_high = np.nan
-    
-    return r2_overall, r2_low, r2_high, fire_threshold
+
+    return (
+        r2_all,
+        r2_low,
+        r2_mid,
+        r2_high,
+        vpd_low_thr,
+        vpd_high_thr,
+    )
 
 
-def fit_quadratic_unweighted(vpd, fires):
-    """Original unweighted quadratic fit."""
+def fit_quadratic_unweighted(vpd: np.ndarray, fires: np.ndarray):
+    """Unweighted quadratic fit in log space."""
     mask = (vpd > 0) & ~np.isnan(fires)
     x = vpd[mask]
     y = fires[mask]
-    
+
     log_x = np.log(x)
     log_y = np.log(y + 1.0)
-    
+
     gamma, beta, alpha = np.polyfit(log_x, log_y, 2)
     return alpha, beta, gamma
 
 
-def fit_quadratic_fire_weighted(vpd, fires, power=1.0):
+def fit_quadratic_vpd_weighted_logspace(
+    vpd: np.ndarray,
+    fires: np.ndarray,
+    power: float = 1.0,
+):
     """
-    Weight by fire_count^power during fitting.
-    Higher power = more emphasis on high-fire days.
+    Quadratic fit with continuous weights that depend on log(VPD).
+
+    1. Work in log(VPD) since the regression is in log space.
+    2. Normalise log(VPD) to [0, 1].
+    3. Raise to 'power' to emphasise the upper tail.
     """
     mask = (vpd > 0) & ~np.isnan(fires)
     x = vpd[mask]
     y = fires[mask]
-    
+
     log_x = np.log(x)
     log_y = np.log(y + 1.0)
-    
-    # Weights proportional to (fire_count + 1)^power
-    weights = (y + 1) ** power
-    # Normalize
+
+    lx_min = np.min(log_x)
+    lx_max = np.max(log_x)
+
+    if lx_max == lx_min:
+        gamma, beta, alpha = np.polyfit(log_x, log_y, 2)
+        return alpha, beta, gamma
+
+    # Normalise log(VPD) into [0, 1]
+    lx_norm = (log_x - lx_min) / (lx_max - lx_min)
+
+    eps = 1e-6
+    weights = np.clip(lx_norm, eps, 1.0) ** power
     weights = weights / np.mean(weights)
-    
+
     gamma, beta, alpha = np.polyfit(log_x, log_y, 2, w=weights)
     return alpha, beta, gamma
 
 
-def fit_quadratic_fire_oversampled(vpd, fires, threshold_percentile=70, oversample_factor=5):
+def fit_tail_powerlaw(vpd: np.ndarray, fires: np.ndarray, vpd_min_tail: float):
     """
-    Oversample high-FIRE days to give them more influence.
+    Fit a simple power-law model only on high-VPD days:
+
+        ln(NoF + 1) = a + b * ln(VPD)
+
+    using data where VPD >= vpd_min_tail.
+    Returns (a, b, r2_tail, n_points).
     """
-    mask = (vpd > 0) & ~np.isnan(fires)
+    mask = (vpd > 0) & ~np.isnan(fires) & (vpd >= vpd_min_tail)
     x = vpd[mask]
     y = fires[mask]
-    
-    fire_threshold = np.percentile(y, threshold_percentile)
-    
+
+    n = x.size
+    if n < 3:
+        return np.nan, np.nan, np.nan, n
+
     log_x = np.log(x)
     log_y = np.log(y + 1.0)
-    
-    # Separate low and high fire days
-    low_mask = y <= fire_threshold
-    high_mask = y > fire_threshold
-    
-    log_x_low = log_x[low_mask]
-    log_y_low = log_y[low_mask]
-    log_x_high = log_x[high_mask]
-    log_y_high = log_y[high_mask]
-    
-    # Oversample high-fire days
-    log_x_high_over = np.tile(log_x_high, oversample_factor)
-    log_y_high_over = np.tile(log_y_high, oversample_factor)
-    
-    # Combine
-    log_x_combined = np.concatenate([log_x_low, log_x_high_over])
-    log_y_combined = np.concatenate([log_y_low, log_y_high_over])
-    
-    gamma, beta, alpha = np.polyfit(log_x_combined, log_y_combined, 2)
-    return alpha, beta, gamma
+
+    # Linear fit in log–log space
+    b, a = np.polyfit(log_x, log_y, 1)
+
+    y_pred = a + b * log_x
+    ss_res = np.sum((log_y - y_pred) ** 2)
+    ss_tot = np.sum((log_y - np.mean(log_y)) ** 2)
+    r2_tail = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    return a, b, r2_tail, n
 
 
-def fit_quadratic_combined_weight(vpd, fires, vpd_power=0.5, fire_power=1.0):
+def tail_objective(stats, w_high: float = 0.7, w_all: float = 0.3) -> float:
     """
-    Weight by both VPD and fire count.
+    Composite score prioritising high-VPD fit but still considering overall fit.
+
+    stats = (alpha, beta, gamma, r2_all, r2_low, r2_mid, r2_high)
     """
-    mask = (vpd > 0) & ~np.isnan(fires)
-    x = vpd[mask]
-    y = fires[mask]
-    
-    log_x = np.log(x)
-    log_y = np.log(y + 1.0)
-    
-    # Combined weight
-    weights = ((x / np.median(x)) ** vpd_power) * ((y + 1) ** fire_power)
-    weights = weights / np.mean(weights)
-    
-    gamma, beta, alpha = np.polyfit(log_x, log_y, 2, w=weights)
-    return alpha, beta, gamma
+    r2_all = stats[3]
+    r2_high = stats[6]
+    return w_high * r2_high + w_all * r2_all
 
 
 def plot_comparison(df: pd.DataFrame):
-    """Compare all fitting approaches."""
+    """Compare VPD based weighting approaches and plot the best tail-focused model."""
     df["season"] = df["met_day"].apply(
         lambda d: "summer" if is_spring_summer(d) else "winter"
     )
@@ -176,144 +214,253 @@ def plot_comparison(df: pd.DataFrame):
     fires = summer_df["fire_count"].values.astype(float)
 
     print("\n" + "=" * 80)
-    print("COMPARING FIRE-COUNT WEIGHTING STRATEGIES")
-    print("(Goal: Improve prediction accuracy for HIGH-FIRE days)")
+    print("COMPARING VPD BASED WEIGHTING STRATEGIES")
+    print("Fitting uses log(VPD) based continuous weights (0–1), no thresholds.")
     print("=" * 80)
-    
-    approaches = {}
-    
-    # 1. Unweighted (original)
-    alpha, beta, gamma = fit_quadratic_unweighted(vpd, fires)
-    r2_all, r2_low, r2_high, fire_threshold = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Unweighted'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\nFire count threshold (70th percentile): {fire_threshold:.0f} fires/day")
-    print(f"\n1. UNWEIGHTED (original):")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 2. Fire-weighted (power=0.5)
-    alpha, beta, gamma = fit_quadratic_fire_weighted(vpd, fires, power=0.5)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Fire weight p=0.5'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n2. FIRE-WEIGHTED (power=0.5):")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 3. Fire-weighted (power=1)
-    alpha, beta, gamma = fit_quadratic_fire_weighted(vpd, fires, power=1.0)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Fire weight p=1'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n3. FIRE-WEIGHTED (power=1):")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 4. Fire-weighted (power=2)
-    alpha, beta, gamma = fit_quadratic_fire_weighted(vpd, fires, power=2.0)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Fire weight p=2'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n4. FIRE-WEIGHTED (power=2):")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 5. Oversample high-fire days 3x
-    alpha, beta, gamma = fit_quadratic_fire_oversampled(vpd, fires, oversample_factor=3)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Oversample fires 3x'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n5. OVERSAMPLE HIGH-FIRE DAYS 3x:")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 6. Oversample high-fire days 5x
-    alpha, beta, gamma = fit_quadratic_fire_oversampled(vpd, fires, oversample_factor=5)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Oversample fires 5x'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n6. OVERSAMPLE HIGH-FIRE DAYS 5x:")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 7. Oversample high-fire days 10x
-    alpha, beta, gamma = fit_quadratic_fire_oversampled(vpd, fires, oversample_factor=10)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Oversample fires 10x'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n7. OVERSAMPLE HIGH-FIRE DAYS 10x:")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # 8. Combined VPD + fire weight
-    alpha, beta, gamma = fit_quadratic_combined_weight(vpd, fires, vpd_power=0.5, fire_power=1.0)
-    r2_all, r2_low, r2_high, _ = compute_r2_by_fire_regime(vpd, fires, alpha, beta, gamma)
-    approaches['Combined weight'] = (alpha, beta, gamma, r2_all, r2_low, r2_high)
-    print(f"\n8. COMBINED WEIGHT (VPD^0.5 × fire^1):")
-    print(f"   R² overall={r2_all:.3f}, low-fire={r2_low:.3f}, HIGH-FIRE={r2_high:.3f}")
-    
-    # Find best
-    best_high_fire = max(approaches.items(), key=lambda x: x[1][5])
+
+    approaches: dict[str, tuple] = {}
+
+    # 1. Unweighted fit
+    alpha_u, beta_u, gamma_u = fit_quadratic_unweighted(vpd, fires)
+
+    (
+        r2_all_u,
+        r2_low_u,
+        r2_mid_u,
+        r2_high_u,
+        vpd_low_thr,
+        vpd_high_thr,
+    ) = compute_r2_by_vpd_regime(vpd, fires, alpha_u, beta_u, gamma_u)
+
+    approaches["Unweighted"] = (
+        alpha_u,
+        beta_u,
+        gamma_u,
+        r2_all_u,
+        r2_low_u,
+        r2_mid_u,
+        r2_high_u,
+    )
+
+    print("\n1. UNWEIGHTED:")
+    print(
+        f"   VPD regime boundaries: low ≤ {vpd_low_thr:.1f} Pa,"
+        f" mid ≤ {vpd_high_thr:.1f} Pa, high > {vpd_high_thr:.1f} Pa"
+    )
+    print(
+        f"   R² overall={r2_all_u:.3f}, low VPD={r2_low_u:.3f},"
+        f" mid VPD={r2_mid_u:.3f}, high VPD={r2_high_u:.3f}"
+    )
+
+    # 2+. VPD-weighted fits with different powers in log-space
+    power_values = [0.5, 1.0, 2.0, 4.0, 8.0]
+
+    for p in power_values:
+        alpha_p, beta_p, gamma_p = fit_quadratic_vpd_weighted_logspace(
+            vpd, fires, power=p
+        )
+        r2_all, r2_low, r2_mid, r2_high, _, _ = compute_r2_by_vpd_regime(
+            vpd, fires, alpha_p, beta_p, gamma_p
+        )
+        key = f"VPD weight p={p}"
+        approaches[key] = (
+            alpha_p,
+            beta_p,
+            gamma_p,
+            r2_all,
+            r2_low,
+            r2_mid,
+            r2_high,
+        )
+        print(f"\n{key}:")
+        print(
+            f"   R² overall={r2_all:.3f}, low VPD={r2_low:.3f},"
+            f" mid VPD={r2_mid:.3f}, high VPD={r2_high:.3f}"
+        )
+
+    # Select champions
+    best_high_vpd = max(approaches.items(), key=lambda x: x[1][6])
     best_overall = max(approaches.items(), key=lambda x: x[1][3])
-    
-    print(f"\n{'=' * 80}")
-    print(f"🔥 BEST HIGH-FIRE R²: {best_high_fire[0]} ({best_high_fire[1][5]:.3f})")
-    print(f"📊 BEST OVERALL R²: {best_overall[0]} ({best_overall[1][3]:.3f})")
+    best_tail = max(approaches.items(), key=lambda x: tail_objective(x[1]))
+
+    print("\n" + "=" * 80)
+    print(
+        f"Best high VPD R²: {best_high_vpd[0]} "
+        f"(R²_high={best_high_vpd[1][6]:.3f})"
+    )
+    print(
+        f"Best overall R²: {best_overall[0]} "
+        f"(R²_all={best_overall[1][3]:.3f})"
+    )
+    print(
+        f"Best tail objective (0.7·R²_high + 0.3·R²_all): {best_tail[0]} "
+        f"(R²_high={best_tail[1][6]:.3f}, R²_all={best_tail[1][3]:.3f})"
+    )
+
+    # Tail-only power-law fit on high-VPD regime
+    a_tail, b_tail, r2_tail, n_tail = fit_tail_powerlaw(vpd, fires, vpd_high_thr)
+    if np.isnan(r2_tail):
+        print("Tail-only power-law fit: not enough high-VPD points to fit.")
+    else:
+        print(
+            f"Tail-only power-law (VPD ≥ {vpd_high_thr:.1f} Pa): "
+            f"n={n_tail}, R²_highVPD={r2_tail:.3f}"
+        )
     print("=" * 80)
-    
+
     # === PLOT ===
     fig, ax = plt.subplots(figsize=(10, 8))
-    
-    # Scatter points - color by fire count intensity
-    ax.scatter(winter_df["VPD_mean"], winter_df["fire_count"],
-               color="blue", alpha=0.50, s=20, label="Autumn/Winter")
-    ax.scatter(summer_df["VPD_mean"], summer_df["fire_count"],
-               color="red", alpha=0.60, s=20, label="Spring/Summer")
-    
-    # Highlight high-fire days
-    high_fire_mask = fires > fire_threshold
-    ax.scatter(vpd[high_fire_mask], fires[high_fire_mask],
-               facecolors='none', edgecolors='darkred', s=60, linewidths=1.5,
-               label=f"High-fire days (>{fire_threshold:.0f})")
-    
-    # Generate curve x-values
+
+    # Scatter points, colour by season
+    ax.scatter(
+        winter_df["VPD_mean"],
+        winter_df["fire_count"],
+        color="blue",
+        alpha=0.50,
+        s=20,
+        label="Autumn and winter",
+    )
+    ax.scatter(
+        summer_df["VPD_mean"],
+        summer_df["fire_count"],
+        color="red",
+        alpha=0.60,
+        s=20,
+        label="Spring and summer",
+    )
+
+    # Get limits and shade VPD regimes (after scatter so y-lims are set)
+    ymin, ymax = ax.get_ylim()
+    vpd_min = np.nanmin(vpd[vpd > 0])
+    vpd_max = np.nanmax(vpd[vpd > 0])
+
+    ax.axvspan(vpd_min, vpd_low_thr, alpha=0.04)
+    ax.axvspan(vpd_low_thr, vpd_high_thr, alpha=0.04)
+    ax.axvspan(vpd_high_thr, vpd_max, alpha=0.04)
+
+    # Vertical dashed lines for regime boundaries
+    ax.axvline(
+        x=vpd_low_thr,
+        color="orange",
+        linestyle=":",
+        linewidth=1.5,
+        alpha=0.7,
+        label="VPD regime boundaries",
+    )
+    ax.axvline(
+        x=vpd_high_thr,
+        color="orange",
+        linestyle=":",
+        linewidth=1.5,
+        alpha=0.7,
+    )
+
+    # Generate curve x values
     vpd_pos = vpd[vpd > 0]
     vpd_range = np.linspace(np.nanmin(vpd_pos), np.nanmax(vpd_pos), 300)
     log_v = np.log(vpd_range)
-    
-    # Original curve (gray dashed)
-    orig = approaches['Unweighted']
-    fires_orig = np.exp(orig[0] + orig[1] * log_v + orig[2] * log_v**2) - 1
+
+    # Original curve (grey dashed)
+    orig = approaches["Unweighted"]
+    fires_orig = np.exp(
+        orig[0] + orig[1] * log_v + orig[2] * (log_v ** 2)
+    ) - 1.0
     fires_orig = np.clip(fires_orig, 0, None)
-    ax.plot(vpd_range, fires_orig, 'gray', linestyle='--', linewidth=2,
-            label=f"Unweighted (R²={orig[3]:.2f}, high-fire={orig[5]:.2f})")
-    
-    # Best high-fire curve (black solid)
-    best = best_high_fire[1]
-    fires_best = np.exp(best[0] + best[1] * log_v + best[2] * log_v**2) - 1
+    ax.plot(
+        vpd_range,
+        fires_orig,
+        "gray",
+        linestyle="--",
+        linewidth=2,
+        label=f"Unweighted (R²_all={orig[3]:.2f}, R²_highVPD={orig[6]:.2f})",
+    )
+
+    # Tail-optimised quadratic curve (black solid)
+    best = best_tail[1]
+    fires_best = np.exp(
+        best[0] + best[1] * log_v + best[2] * (log_v ** 2)
+    ) - 1.0
     fires_best = np.clip(fires_best, 0, None)
-    ax.plot(vpd_range, fires_best, 'black', linewidth=2.5,
-            label=f"{best_high_fire[0]} (R²={best[3]:.2f}, high-fire={best[5]:.2f})")
-    
-    # Horizontal line at fire threshold
-    ax.axhline(y=fire_threshold, color="orange", linestyle=":", alpha=0.7, linewidth=1.5,
-               label=f"High-fire threshold ({fire_threshold:.0f} fires)")
-    
-    ax.set_title("Daily Wildfires vs VPD (London, 2009–2024)\nOptimized for High-Fire Day Prediction", fontsize=14)
+    ax.plot(
+        vpd_range,
+        fires_best,
+        "black",
+        linewidth=2.5,
+        label=(
+            f"{best_tail[0]} "
+            f"(R²_all={best[3]:.2f}, R²_highVPD={best[6]:.2f})"
+        ),
+    )
+
+    # Tail-only power-law curve (drawn only for high VPD)
+    if not np.isnan(a_tail):
+        vpd_tail_range = np.linspace(vpd_high_thr, vpd_max, 150)
+        log_v_tail = np.log(vpd_tail_range)
+        fires_tail_curve = np.exp(a_tail + b_tail * log_v_tail) - 1.0
+        fires_tail_curve = np.clip(fires_tail_curve, 0, None)
+        ax.plot(
+            vpd_tail_range,
+            fires_tail_curve,
+            linestyle="-.",
+            linewidth=2,
+            label=f"High-VPD tail-only power law (R²_highVPD={r2_tail:.2f})",
+        )
+
+    ax.set_title(
+        "Daily wildfires vs VPD (London, 2009–2024)\n"
+        "Quadratic fits with log(VPD) weighting and high-VPD tail power law",
+        fontsize=14,
+    )
     ax.set_xlabel("VPD_mean (Pa)", fontsize=12)
-    ax.set_ylabel("Daily Wildfire Count", fontsize=12)
+    ax.set_ylabel("Daily wildfire count", fontsize=12)
     ax.legend(loc="upper left", framealpha=0.9)
     ax.grid(True, alpha=0.3)
-    
-    # Add equation box
-    textstr = (f"Best fit for high-fire days ({best_high_fire[0]}):\n"
-               f"ln(NoF+1) = {best[0]:.2f} + {best[1]:.2f}·ln(VPD) + {best[2]:.3f}·[ln(VPD)]²\n"
-               f"R² overall = {best[3]:.2f}\n"
-               f"R² high-fire days = {best[5]:.2f}")
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-    ax.text(0.98, 0.55, textstr, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', horizontalalignment='right', bbox=props)
-    
+
+    # Equation box for tail-optimised quadratic model
+    textstr = (
+        f"Tail-optimised quadratic: {best_tail[0]}\n"
+        f"ln(NoF + 1) = {best[0]:.2f} + {best[1]:.2f} · ln(VPD)"
+        f" + {best[2]:.3f} · [ln(VPD)]²\n"
+        f"R² overall = {best[3]:.2f}\n"
+        f"R² low VPD = {best[4]:.2f}\n"
+        f"R² mid VPD = {best[5]:.2f}\n"
+        f"R² high VPD = {best[6]:.2f}\n"
+        f"VPD regimes: ≤ {vpd_low_thr:.1f} Pa, "
+        f"{vpd_low_thr:.1f}–{vpd_high_thr:.1f} Pa, "
+        f"> {vpd_high_thr:.1f} Pa"
+    )
+    if not np.isnan(a_tail):
+        textstr += (
+            f"\n\nHigh-VPD tail power law (VPD ≥ {vpd_high_thr:.1f} Pa):\n"
+            f"ln(NoF + 1) = {a_tail:.2f} + {b_tail:.2f} · ln(VPD)\n"
+            f"R² high-VPD = {r2_tail:.2f}, n = {n_tail}"
+        )
+
+    props = dict(boxstyle="round", facecolor="wheat", alpha=0.8)
+    ax.text(
+        0.98,
+        0.55,
+        textstr,
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox=props,
+    )
+
     plt.tight_layout()
-    
-    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_fire_weighted.png"
+
+    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_vpd_weighted.png"
     plt.savefig(out_path, dpi=400)
     print(f"\nSaved plot to: {out_path}")
-    
+
     plt.show()
 
 
 def main():
     print("Loading data...")
     df = load_all_data()
-    print("Comparing fire-count weighting strategies...")
+    print("Comparing VPD based weighting strategies...")
     plot_comparison(df)
 
 
