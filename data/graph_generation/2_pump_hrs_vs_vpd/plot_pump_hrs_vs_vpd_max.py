@@ -7,7 +7,7 @@ import matplotlib.lines as mlines   # for custom legend entries
 from scipy.optimize import curve_fit
 
 # ==== CONFIGURATION ====
-BASE_DIR = Path("data/graph_generation/pump_hrs_vs_vpd")
+BASE_DIR = Path("data/graph_generation/2_pump_hrs_vs_vpd")
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 # =======================
 
@@ -103,7 +103,7 @@ def plot_pump_hours_vs_vpd(df: pd.DataFrame):
     winter_df = df[df["season"] == "winter"]
 
     vpd_all = df["VPD_max"].values
-    pumps_all = df["pump_count"].values.astype(float)
+    pumps_all = df["pump_hours"].values.astype(float)
 
     # ---- Fit power law: PH + 1 = A * VPD^B ----
     A_pl, B_pl, r2 = fit_power_law(vpd_all, pumps_all)
@@ -127,7 +127,7 @@ def plot_pump_hours_vs_vpd(df: pd.DataFrame):
     # winter = blue
     ax.scatter(
         winter_df["VPD_max"],
-        winter_df["pump_count"],
+        winter_df["pump_hours"],
         color="blue",
         alpha=0.50,
         s=20,
@@ -137,7 +137,7 @@ def plot_pump_hours_vs_vpd(df: pd.DataFrame):
     # summer = red
     ax.scatter(
         summer_df["VPD_max"],
-        summer_df["pump_count"],
+        summer_df["pump_hours"],
         color="red",
         alpha=0.60,
         s=20,
@@ -200,7 +200,7 @@ def main():
     print("Loading merged weather and pump datasets...")
     df = load_all_data()
 
-    print("Plotting pump_count vs VPD_max with power law fit...")
+    print("Plotting pump_hours vs VPD_max with power law fit...")
     plot_pump_hours_vs_vpd(df)
 
 

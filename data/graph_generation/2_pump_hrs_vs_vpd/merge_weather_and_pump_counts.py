@@ -7,7 +7,7 @@ BASE_DATA = Path("data")
 WEATHER_DIR = BASE_DATA / "pre_processing" / "metoffice_midas_processed" / "uk-hourly-weather-obs_processed" / "3_averaged_by_year"
 FIRE_DIR = BASE_DATA / "pre_processing" / "lfb_fire_data_processed" / "3_pump_hours"
 
-OUTPUT_DIR = BASE_DATA / "graph_generation" / "pump_hrs_vs_vpd"
+OUTPUT_DIR = BASE_DATA / "graph_generation" / "2_pump_hrs_vs_vpd"
 
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 # =========================
@@ -38,8 +38,8 @@ def merge_weather_and_pumps(year: int):
 
     # --- Load pump counts ---
     df_p = pd.read_csv(pump_file)
-    if "date" not in df_p.columns or "pump_count" not in df_p.columns:
-        raise ValueError(f"'date' or 'pump_count' missing in {pump_file}")
+    if "date" not in df_p.columns or "pump_hours" not in df_p.columns:
+        raise ValueError(f"'date' or 'pump_hours' missing in {pump_file}")
 
     df_p["date"] = pd.to_datetime(df_p["date"], errors="coerce")
 
@@ -55,12 +55,12 @@ def merge_weather_and_pumps(year: int):
     # Drop extra 'date' column (we keep met_day)
     merged = merged.drop(columns=["date"])
 
-    # If any pump_count missing (should not happen, but safe) → 0
-    merged["pump_count"] = merged["pump_count"].fillna(0).astype(int)
+    # If any pump_hours missing (should not happen, but safe) → 0
+    merged["pump_hours"] = merged["pump_hours"].fillna(0).astype(int)
 
-    # --- Reorder: put pump_count right after met_day ---
+    # --- Reorder: put pump_hours right after met_day ---
     cols = list(merged.columns)
-    cols.insert(1, cols.pop(cols.index("pump_count")))
+    cols.insert(1, cols.pop(cols.index("pump_hours")))
     merged = merged[cols]
 
     # Ensure met_day written as date only (YYYY-MM-DD)

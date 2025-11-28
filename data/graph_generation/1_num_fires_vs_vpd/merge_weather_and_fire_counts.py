@@ -7,7 +7,7 @@ BASE_DATA = Path("data")
 WEATHER_DIR = BASE_DATA / "pre_processing" / "metoffice_midas_processed" / "uk-hourly-weather-obs_processed" / "3_averaged_by_year"
 FIRE_DIR = BASE_DATA / "pre_processing" / "lfb_fire_data_processed" / "2_number_fires"
 
-OUTPUT_DIR = BASE_DATA / "graph_generation" / "num_fires_vs_vpd"
+OUTPUT_DIR = BASE_DATA / "graph_generation" / "1_num_fires_vs_vpd"
 
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 # =========================
