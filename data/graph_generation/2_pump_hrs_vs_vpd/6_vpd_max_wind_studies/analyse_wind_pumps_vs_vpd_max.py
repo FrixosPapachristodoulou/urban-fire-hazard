@@ -30,7 +30,7 @@ WIND_COLORS = {
     ">4 m/s": "#d62728",
 }
 
-VPD_COL = "VPD_mean"
+VPD_COL = "VPD_max"
 WIND_COL = "wind_speed_mean"  # from CSV, in knots
 REF_VPD = 1000.0  # Pa reference line
 # =======================
@@ -188,7 +188,7 @@ def plot_stratified_wind(df: pd.DataFrame,
 
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
 
-    out_dir = BASE_DIR / "5_vpd_wind_studies"
+    out_dir = BASE_DIR / "6_vpd_max_wind_studies"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"pumps_vs_{vpd_col}_by_wind_category.png"
     plt.savefig(out_path, dpi=300)

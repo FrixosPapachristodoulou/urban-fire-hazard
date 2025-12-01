@@ -183,7 +183,7 @@ def plot_stratified_wind(df: pd.DataFrame,
         "VPD vs Fires Stratified by Mean Daily Wind Speed (m/s)",
         fontsize=14,
         fontweight="bold",
-        y=0.95,
+        y=0.92,
     )
 
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
