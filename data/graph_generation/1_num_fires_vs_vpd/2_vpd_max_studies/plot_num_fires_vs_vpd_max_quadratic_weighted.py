@@ -217,6 +217,9 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
     # Store all scatter artists and their corresponding data for hover
     all_scatter_artists = []
 
+    # Store secondary axes for later adjustment
+    secondary_axes = []
+
     for ax, (title, subset_mask) in zip(axes, scenarios):
         # which points actually participate in the fit?
         fit_mask = subset_mask & (vpd_all > 0) & ~np.isnan(fires_all)
@@ -303,6 +306,44 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             linewidth=2,
         )
 
+        # ---- Secondary axis: weight curve ----
+        ax2 = ax.twinx()
+        secondary_axes.append(ax2)
+        
+        # Compute weights across the full VPD range shown in subplot
+        vpd_for_weights = np.linspace(1, 6000, 500)
+        # Weights based on percentile rank (simulating the ranking)
+        q_values = vpd_for_weights / 6000  # approximate percentile as fraction of max
+        weights_curve = (np.exp(LAMBDA_WEIGHT * q_values) - 1.0) / (np.exp(LAMBDA_WEIGHT) - 1.0)
+        
+        ax2.fill_between(
+            vpd_for_weights,
+            0,
+            weights_curve,
+            color="purple",
+            alpha=0.06,
+        )
+        ax2.plot(
+            vpd_for_weights,
+            weights_curve,
+            color="purple",
+            alpha=0.25,
+            linewidth=1.5,
+            linestyle="--",
+        )
+        ax2.set_ylim(0, 1.05)
+        ax2.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax2.tick_params(axis='y', labelcolor="purple", labelsize=7, colors="purple")
+        for label in ax2.get_yticklabels():
+            label.set_alpha(0.4)
+        
+        # Only show y-label on right-side subplots
+        if ax in [axes[1], axes[3]]:
+            ax2.set_ylabel("Weight $w(q)$", fontsize=9, color="purple", alpha=0.4)
+        else:
+            ax2.set_yticklabels([])
+
+
         # mark the high VPD threshold with a vertical line (more transparent)
         ax.axvline(
             HIGH_VPD_THRESHOLD,
@@ -348,10 +389,15 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         label=f"{HIGH_VPD_PERCENTILE}th pctl threshold"
     )
 
+    weight_handle = mlines.Line2D(
+        [], [], color="purple", alpha=0.3, linestyle="--",
+        label="Weight $w(q)$"
+    )
+
     fig.legend(
-        handles=season_handles + [curve_handle, threshold_handle],
+        handles=season_handles + [curve_handle, threshold_handle, weight_handle],
         loc="upper center",
-        ncol=6,
+        ncol=7,
         framealpha=0.9,
         bbox_to_anchor=(0.5, 0.97),
     )
