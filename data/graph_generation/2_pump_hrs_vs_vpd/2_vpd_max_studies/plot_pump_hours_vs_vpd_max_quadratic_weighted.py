@@ -8,7 +8,7 @@ import mplcursors  # for interactive hover
 from scipy.stats import rankdata  # for percentile-based weighting
 
 # ==== CONFIGURATION ====
-BASE_DIR = Path("data/graph_generation/1_num_fires_vs_vpd")
+BASE_DIR = Path("data/graph_generation/2_pump_hrs_vs_vpd")
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
 
 # Percentile that defines the "high VPD" tail region.
@@ -44,11 +44,11 @@ SEASON_COLORS = {
 
 
 def load_all_data() -> pd.DataFrame:
-    """Load all yearly merged weather + fire CSV files into one DataFrame."""
+    """Load all yearly merged weather + pump CSV files into one DataFrame."""
     dfs = []
 
     for year in YEARS:
-        file = BASE_DIR / f"daily_weather_fire_{year}.csv"
+        file = BASE_DIR / f"daily_weather_pump_{year}.csv"
         if not file.exists():
             print(f"⚠️ Missing {file}")
             continue
@@ -77,7 +77,7 @@ def compute_exponential_weights(vpd: np.ndarray, lam: float = LAMBDA_WEIGHT) -> 
     This gives:
     - w(0) = 0  (lowest VPD → zero weight)
     - w(1) = 1  (highest VPD → full weight)
-    - Exponential growth mirrors how fire danger scales with dryness
+    - Exponential growth mirrors how pump danger scales with dryness
     
     With λ=3:
         10th percentile → weight ≈ 0.05
@@ -102,7 +102,7 @@ def compute_exponential_weights(vpd: np.ndarray, lam: float = LAMBDA_WEIGHT) -> 
     return weights
 
 
-def fit_quadratic_loglog(vpd: np.ndarray, fires: np.ndarray, use_weighting: bool = True):
+def fit_quadratic_loglog(vpd: np.ndarray, pumps: np.ndarray, use_weighting: bool = True):
     """
     Fit a quadratic relation in log–log space:
 
@@ -110,17 +110,17 @@ def fit_quadratic_loglog(vpd: np.ndarray, fires: np.ndarray, use_weighting: bool
 
     With optional percentile-exponential weighting to prioritise high-VPD days.
     This biases the fit towards dangerous (high-VPD) conditions where
-    accurate fire prediction matters most.
+    accurate pump prediction matters most.
 
     Returns (c2, c1, c0), R²_all   [np.polyfit order].
     """
     vpd = np.asarray(vpd, dtype=float)
-    fires = np.asarray(fires, dtype=float)
+    pumps = np.asarray(pumps, dtype=float)
 
-    # need positive VPD for the log; keep ALL fire counts (including zeros)
-    mask = (vpd > 0) & ~np.isnan(fires)
+    # need positive VPD for the log; keep ALL pump counts (including zeros)
+    mask = (vpd > 0) & ~np.isnan(pumps)
     x = vpd[mask]
-    y = fires[mask]
+    y = pumps[mask]
 
     if len(x) < 3:
         raise RuntimeError("Not enough data points for quadratic log–log fit.")
@@ -150,7 +150,7 @@ def fit_quadratic_loglog(vpd: np.ndarray, fires: np.ndarray, use_weighting: bool
 
 def compute_r2_high_vpd(
     vpd: np.ndarray,
-    fires: np.ndarray,
+    pumps: np.ndarray,
     c2: float,
     c1: float,
     c0: float,
@@ -160,14 +160,14 @@ def compute_r2_high_vpd(
     Computation is done in the same log space as the fit (unweighted for fair evaluation).
     """
     vpd = np.asarray(vpd, dtype=float)
-    fires = np.asarray(fires, dtype=float)
+    pumps = np.asarray(pumps, dtype=float)
 
-    mask = (vpd > HIGH_VPD_THRESHOLD) & (vpd > 0) & ~np.isnan(fires)
+    mask = (vpd > HIGH_VPD_THRESHOLD) & (vpd > 0) & ~np.isnan(pumps)
     if mask.sum() < 3:
         return np.nan
 
     x = vpd[mask]
-    y = fires[mask]
+    y = pumps[mask]
 
     log_x = np.log(x)
     log_y = np.log(y + 1.0)
@@ -180,8 +180,8 @@ def compute_r2_high_vpd(
 
 
 def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
-    vpd_all = df["VPD_mean"].values.astype(float)
-    fires_all = df["fire_count"].values.astype(float)
+    vpd_all = df["VPD_max"].values.astype(float)
+    pumps_all = df["pump_hours"].values.astype(float)
     dates_all = df["met_day"].values  # store dates for hover
     seasons = df["season"].values
 
@@ -211,8 +211,8 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
     
     # Set axis limits
     for ax in axes:
-        ax.set_xlim(0, 3050)
-        ax.set_ylim(0, 120)
+        ax.set_xlim(0, 6000)
+        ax.set_ylim(0, 1750)
 
     # Store all scatter artists and their corresponding data for hover
     all_scatter_artists = []
@@ -222,22 +222,22 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
 
     for ax, (title, subset_mask) in zip(axes, scenarios):
         # which points actually participate in the fit?
-        fit_mask = subset_mask & (vpd_all > 0) & ~np.isnan(fires_all)
+        fit_mask = subset_mask & (vpd_all > 0) & ~np.isnan(pumps_all)
 
         # subset data for this scenario
         vpd_fit_data = vpd_all[fit_mask]
-        fires_fit_data = fires_all[fit_mask]
+        pumps_fit_data = pumps_all[fit_mask]
 
         # ---- Percentile-exponential weighted quadratic log–log fit ----
         coeffs, r2_all = fit_quadratic_loglog(
             vpd_fit_data,
-            fires_fit_data,
+            pumps_fit_data,
             use_weighting=True,
         )
         c2, c1, c0 = coeffs
 
         # R² in the high VPD regime (evaluation, still unweighted)
-        r2_high = compute_r2_high_vpd(vpd_fit_data, fires_fit_data, c2, c1, c0)
+        r2_high = compute_r2_high_vpd(vpd_fit_data, pumps_fit_data, c2, c1, c0)
 
         # X-range for curve in this subplot (based on used points)
         # Avoid tiny VPD values that cause log(VPD) → -∞ behaviour in quadratic fits
@@ -246,10 +246,10 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         vpd_curve = np.linspace(vpd_min_safe, vpd_max, 300)
 
         log_vpd_curve = np.log(vpd_curve)
-        log_fires_curve = c2 * log_vpd_curve**2 + c1 * log_vpd_curve + c0
+        log_pumps_curve = c2 * log_vpd_curve**2 + c1 * log_vpd_curve + c0
 
-        fires_curve = np.exp(log_fires_curve) - 1.0
-        fires_curve = np.clip(fires_curve, 0, None)
+        pumps_curve = np.exp(log_pumps_curve) - 1.0
+        pumps_curve = np.clip(pumps_curve, 0, None)
 
         # ---- scatter points by season with different alpha depending on fit participation ----
         for season_name, color in SEASON_COLORS.items():
@@ -262,7 +262,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             if unused.any():
                 sc_unused = ax.scatter(
                     vpd_all[unused],
-                    fires_all[unused],
+                    pumps_all[unused],
                     s=10,
                     alpha=0.15,
                     color=color,
@@ -274,7 +274,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
                     'artist': sc_unused,
                     'dates': dates_all[unused],
                     'vpd': vpd_all[unused],
-                    'fires': fires_all[unused],
+                    'pumps': pumps_all[unused],
                     'season': season_name,
                 })
 
@@ -282,7 +282,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             if used.any():
                 sc_used = ax.scatter(
                     vpd_all[used],
-                    fires_all[used],
+                    pumps_all[used],
                     s=10,
                     alpha=0.95,
                     color=color,
@@ -294,14 +294,14 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
                     'artist': sc_used,
                     'dates': dates_all[used],
                     'vpd': vpd_all[used],
-                    'fires': fires_all[used],
+                    'pumps': pumps_all[used],
                     'season': season_name,
                 })
 
         # plot quadratic log–log curve
         ax.plot(
             vpd_curve,
-            fires_curve,
+            pumps_curve,
             color="black",
             linewidth=2,
         )
@@ -311,9 +311,9 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         secondary_axes.append(ax2)
         
         # Compute weights across the full VPD range shown in subplot
-        vpd_for_weights = np.linspace(1, 3050, 500)
+        vpd_for_weights = np.linspace(1, 6000, 500)
         # Weights based on percentile rank (simulating the ranking)
-        q_values = vpd_for_weights / 3050  # approximate percentile as fraction of max
+        q_values = vpd_for_weights / 6000  # approximate percentile as fraction of max
         weights_curve = (np.exp(LAMBDA_WEIGHT * q_values) - 1.0) / (np.exp(LAMBDA_WEIGHT) - 1.0)
         
         ax2.fill_between(
@@ -342,6 +342,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             ax2.set_ylabel("Weight $w(q)$", fontsize=9, color="purple", alpha=0.4)
         else:
             ax2.set_yticklabels([])
+
 
         # mark the high VPD threshold with a vertical line (more transparent)
         ax.axvline(
@@ -373,8 +374,8 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         ax.grid(True, alpha=0.3)
 
     # shared labels
-    fig.supxlabel("VPD_mean (Pa)", fontsize=13)
-    fig.supylabel("Daily wildfire count", fontsize=13, fontweight="bold")
+    fig.supxlabel("VPD_max (Pa)", fontsize=13)
+    fig.supylabel("Daily Pump Hours", fontsize=13, fontweight="bold")
 
     # ----- global legend for seasons + curve + threshold -----
     season_handles = [
@@ -440,7 +441,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         idx = sel.index
         date = metadata['dates'][idx]
         vpd = metadata['vpd'][idx]
-        fires = metadata['fires'][idx]
+        pumps = metadata['pumps'][idx]
         season = metadata['season']
         
         # Format the date nicely
@@ -453,13 +454,13 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             f"Date: {date_str}\n"
             f"Season: {season.capitalize()}\n"
             f"VPD: {vpd:.1f} Pa\n"
-            f"Fires: {int(fires)}"
+            f"Pumps: {int(pumps)}"
         )
         sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
 
     # ===================================
 
-    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_quadratic_weighted.png"
+    out_path = BASE_DIR / "2_vpd_max_studies/pumps_vs_vpd_max_quadratic_weighted.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=400)
     print(f"Saved seasonal quadratic log-log figure to: {out_path}")
@@ -468,11 +469,11 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
 
 
 def main():
-    print("Loading merged weather and fire datasets...")
+    print("Loading merged weather and pump datasets...")
     df = load_all_data()
 
     # --- USE ONLY FINITE, POSITIVE VPD VALUES ---
-    vpd_all = df["VPD_mean"].values.astype(float)
+    vpd_all = df["VPD_max"].values.astype(float)
     mask = np.isfinite(vpd_all) & (vpd_all > 0)
 
     valid_vpd = vpd_all[mask]

@@ -321,13 +321,13 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             0,
             weights_curve,
             color="purple",
-            alpha=0.06,
+            alpha=0.04,
         )
         ax2.plot(
             vpd_for_weights,
             weights_curve,
             color="purple",
-            alpha=0.25,
+            alpha=0.15,
             linewidth=1.5,
             linestyle="--",
         )
