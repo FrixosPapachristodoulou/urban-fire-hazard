@@ -110,9 +110,14 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
     ]
 
     fig, axes = plt.subplots(
-        2, 2, figsize=(11, 9), sharex=True, sharey=True
+        2, 2, figsize=(16, 9), sharex=True, sharey=True
     )
     axes = axes.ravel()
+    
+    # Set axis limits
+    for ax in axes:
+        ax.set_xlim(0, 3000)
+        ax.set_ylim(0, 120)
 
     for ax, (title, subset_mask) in zip(axes, scenarios):
         # which points actually participate in the fit?
@@ -167,7 +172,8 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
 
         ax.set_title(
             f"$\\mathbf{{{title.replace(' ', '~')}}}$\n"
-            f"NoF + 1 = {a_pl:.2g} · VPD$^{{{b_pl:.2f}}}$,  $\\mathbf{{R^2 = {r2:.2f}}}$",
+            f"NoF + 1 = {a_pl:.2g} · VPD$^{{{b_pl:.2f}}}$\n"
+            f"$\\mathbf{{R^2 = {r2:.2f}}}$",
             fontsize=11,
         )
         ax.grid(True, alpha=0.3)
@@ -188,7 +194,7 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
         loc="upper center",
         ncol=5,
         framealpha=0.9,
-        bbox_to_anchor=(0.5, 0.99),
+        bbox_to_anchor=(0.5, 0.97),
     )
 
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
