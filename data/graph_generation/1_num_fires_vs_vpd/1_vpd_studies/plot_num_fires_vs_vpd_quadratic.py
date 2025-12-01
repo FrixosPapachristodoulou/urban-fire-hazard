@@ -8,6 +8,11 @@ import matplotlib.lines as mlines  # for custom legend entries
 # ==== CONFIGURATION ====
 BASE_DIR = Path("data/graph_generation/1_num_fires_vs_vpd")
 YEARS = list(range(2009, 2025))  # 2009–2024 inclusive
+
+# High VPD threshold used to define the tail region for R²_high.
+# 611.5 Pa is the boundary between the mid- and high-VPD regimes
+# obtained from the VPD regime analysis (low ≤ 368.4 Pa, mid ≤ 611.5 Pa, high > 611.5 Pa).
+HIGH_VPD_THRESHOLD = 611.5  # Pa
 # =======================
 
 
@@ -63,7 +68,7 @@ def fit_quadratic_loglog(vpd: np.ndarray, fires: np.ndarray):
 
         log(NoF + 1) = c0 + c1*log(VPD) + c2*[log(VPD)]^2
 
-    Returns (c2, c1, c0), R2   [np.polyfit order].
+    Returns (c2, c1, c0), R²_all   [np.polyfit order].
     """
     vpd = np.asarray(vpd, dtype=float)
     fires = np.asarray(fires, dtype=float)
@@ -84,13 +89,45 @@ def fit_quadratic_loglog(vpd: np.ndarray, fires: np.ndarray):
     coeffs = np.polyfit(log_x, log_y, 2)
     c2, c1, c0 = coeffs
 
-    # compute R^2 in log space
+    # compute R² in log space over all data used for fitting
     y_pred_log = c2 * log_x**2 + c1 * log_x + c0
     ss_res = np.sum((log_y - y_pred_log) ** 2)
     ss_tot = np.sum((log_y - np.mean(log_y)) ** 2)
-    r2 = 1.0 - ss_res / ss_tot
+    r2_all = 1.0 - ss_res / ss_tot
 
-    return coeffs, r2
+    return coeffs, r2_all
+
+
+def compute_r2_high_vpd(
+    vpd: np.ndarray,
+    fires: np.ndarray,
+    c2: float,
+    c1: float,
+    c0: float,
+    threshold: float = HIGH_VPD_THRESHOLD,
+) -> float:
+    """
+    Compute R² restricted to the high VPD regime, defined as VPD > threshold.
+    Computation is done in the same log space as the fit.
+    """
+    vpd = np.asarray(vpd, dtype=float)
+    fires = np.asarray(fires, dtype=float)
+
+    mask = (vpd > threshold) & (vpd > 0) & ~np.isnan(fires)
+    if mask.sum() < 3:
+        return np.nan
+
+    x = vpd[mask]
+    y = fires[mask]
+
+    log_x = np.log(x)
+    log_y = np.log(y + 1.0)
+
+    y_pred_log = c2 * log_x**2 + c1 * log_x + c0
+    ss_res = np.sum((log_y - y_pred_log) ** 2)
+    ss_tot = np.sum((log_y - np.mean(log_y)) ** 2)
+
+    return 1.0 - ss_res / ss_tot
 
 
 def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
@@ -118,16 +155,17 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         # fit quadratic log-log on the participating subset
         vpd_fit_data = vpd_all[fit_mask]
         fires_fit_data = fires_all[fit_mask]
-        coeffs, r2 = fit_quadratic_loglog(vpd_fit_data, fires_fit_data)
+        coeffs, r2_all = fit_quadratic_loglog(vpd_fit_data, fires_fit_data)
         c2, c1, c0 = coeffs
+
+        # R² in the high VPD regime
+        r2_high = compute_r2_high_vpd(vpd_fit_data, fires_fit_data, c2, c1, c0)
 
         # X-range for curve in this subplot (based on used points)
         # Avoid tiny VPD values that cause log(VPD) → -∞ behaviour in quadratic fits
-        vpd_min_safe = max(np.nanpercentile(vpd_fit_data, 5), 20)  # clip at 20 Pa minimum
+        vpd_min_safe = max(np.nanpercentile(vpd_fit_data, 5), 20.0)  # clip at 20 Pa minimum
         vpd_max = np.nanmax(vpd_fit_data)
-
         vpd_curve = np.linspace(vpd_min_safe, vpd_max, 300)
-
 
         log_vpd_curve = np.log(vpd_curve)
         log_fires_curve = c2 * log_vpd_curve**2 + c1 * log_vpd_curve + c0
@@ -170,6 +208,15 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             linewidth=2,
         )
 
+        # mark the high VPD threshold with a vertical line (more transparent)
+        ax.axvline(
+            HIGH_VPD_THRESHOLD,
+            color="black",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.3,  # lower opacity
+        )
+
         # nice title with the quadratic relation in log–log space
         season_title = r"$\mathbf{" + title.replace(" ", r"\ ") + "}$"
         eq_line = (
@@ -181,10 +228,12 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
             f"{c2:.2f}"
             r"[\ln(\mathrm{VPD})]^2$"
         )
-        r2_line = rf"$\mathbf{{R^2 = {r2:.2f}}}$"
+        r2_all_line = rf"$\mathbf{{R^2_{{all}} = {r2_all:.2f}}}$"
+        # R²_high not bold:
+        r2_high_line = rf"$R^2_{{high}} = {r2_high:.2f}$"
 
         ax.set_title(
-            f"{season_title}\n{eq_line}\n{r2_line}",
+            f"{season_title}\n{eq_line}\n{r2_all_line}, {r2_high_line}",
             fontsize=11,
         )
         ax.grid(True, alpha=0.3)
@@ -193,28 +242,44 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
     fig.supxlabel("VPD_mean (Pa)", fontsize=13)
     fig.supylabel("Daily wildfire count", fontsize=13, fontweight="bold")
 
-    # ----- global legend for seasons + curve -----
+    # ----- global legend for seasons + curve + threshold -----
     season_handles = [
         mlines.Line2D([], [], color=color, marker="o", linestyle="None",
                       label=season_name.capitalize())
         for season_name, color in SEASON_COLORS.items()
     ]
-    curve_handle = mlines.Line2D([], [], color="black", label="Quadratic log–log fit")
+    curve_handle = mlines.Line2D([], [], color="black", label="Quadratic log-log fit")
+    threshold_handle = mlines.Line2D(
+        [], [], color="black", linestyle="--", alpha=0.3,
+        label="High VPD threshold"
+    )
 
     fig.legend(
-        handles=season_handles + [curve_handle],
+        handles=season_handles + [curve_handle, threshold_handle],
         loc="upper center",
-        ncol=5,
+        ncol=6,
         framealpha=0.9,
         bbox_to_anchor=(0.5, 0.99),
     )
 
-    plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
+    # explanatory note about what "high VPD" means for R²_high
+    fig.text(
+        0.44,
+        0.06,
+        (
+            "High-VPD region used for $R^2_{high}$: VPD in the upper tercile "
+            "(above the 67th percentile of the VPD distribution)."
+        ),
+        ha="center",
+        fontsize=10,
+    )
+
+    plt.tight_layout(rect=[0.03, 0.04, 1, 0.93])
 
     out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_quadratic_loglog_seasonal.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=400)
-    print(f"Saved seasonal quadratic log–log figure to: {out_path}")
+    print(f"Saved seasonal quadratic log-log figure to: {out_path}")
 
     plt.show()
 
@@ -223,7 +288,7 @@ def main():
     print("Loading merged weather and fire datasets...")
     df = load_all_data()
 
-    print("Plotting seasonal quadratic log–log fits...")
+    print("Plotting seasonal quadratic log-log fits...")
     plot_seasonal_quadratic_loglog(df)
 
 
