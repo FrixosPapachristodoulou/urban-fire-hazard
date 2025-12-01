@@ -154,7 +154,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
     
     # Set axis limits
     for ax in axes:
-        ax.set_xlim(0, 3000)
+        ax.set_xlim(0, 3050)
         ax.set_ylim(0, 120)
 
     # Store all scatter artists and their corresponding data for hover
