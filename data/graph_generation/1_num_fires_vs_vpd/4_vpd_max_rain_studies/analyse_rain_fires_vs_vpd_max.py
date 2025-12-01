@@ -82,7 +82,7 @@ def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
     return a, b, r2
 
 
-def plot_stratified(df: pd.DataFrame, vpd_col: str = "VPD_mean"):
+def plot_stratified(df: pd.DataFrame, vpd_col: str = "VPD_max"):
     """Create 2x2 stratified VPD vs fires plot."""
     
     df_valid = df[
@@ -175,7 +175,7 @@ def plot_stratified(df: pd.DataFrame, vpd_col: str = "VPD_mean"):
         
         # Styling
         ax.grid(True, alpha=0.3)
-        ax.set_xlim(0, 3050)
+        ax.set_xlim(0, 6000)
         ax.set_ylim(0, 120)
 
     # Shared labels and main title (outside loop)
@@ -191,7 +191,7 @@ def plot_stratified(df: pd.DataFrame, vpd_col: str = "VPD_mean"):
     # Make room for suptitle
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
     
-    out_dir = BASE_DIR / "3_vpd_rain_studies"
+    out_dir = BASE_DIR / "4_vpd_max_rain_studies"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"fires_vs_{vpd_col}_by_rain_category.png"
     plt.savefig(out_path, dpi=300)
@@ -206,10 +206,10 @@ def main():
     df = load_and_merge_data()
     
     print("Generating stratified plot...")
-    plot_stratified(df, "VPD_mean")
+    plot_stratified(df, "VPD_max")
     
     # Save merged dataset
-    out_dir = BASE_DIR / "3_vpd_rain_studies"
+    out_dir = BASE_DIR / "4_vpd_max_rain_studies"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "daily_weather_fire_rain_merged.csv"
     df.to_csv(out_path, index=False)
