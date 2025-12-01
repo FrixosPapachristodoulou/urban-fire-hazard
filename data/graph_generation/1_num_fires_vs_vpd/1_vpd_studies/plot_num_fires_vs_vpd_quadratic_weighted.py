@@ -260,7 +260,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
                 sc_unused = ax.scatter(
                     vpd_all[unused],
                     fires_all[unused],
-                    s=18,
+                    s=10,
                     alpha=0.15,
                     color=color,
                     edgecolors="none",
@@ -280,7 +280,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
                 sc_used = ax.scatter(
                     vpd_all[used],
                     fires_all[used],
-                    s=22,
+                    s=10,
                     alpha=0.95,
                     color=color,
                     edgecolors="none",
@@ -414,7 +414,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
 
     # ===================================
 
-    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_quadratic_weighted_seasonal.png"
+    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_quadratic_weighted.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=400)
     print(f"Saved seasonal quadratic log-log figure to: {out_path}")

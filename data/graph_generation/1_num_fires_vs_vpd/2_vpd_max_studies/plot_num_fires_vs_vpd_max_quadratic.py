@@ -134,7 +134,7 @@ def compute_r2_high_vpd(
 
 
 def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
-    vpd_all = df["VPD_mean"].values.astype(float)
+    vpd_all = df["VPD_max"].values.astype(float)
     fires_all = df["fire_count"].values.astype(float)
     dates_all = df["met_day"].values  # store dates for hover
     seasons = df["season"].values
@@ -154,7 +154,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
     
     # Set axis limits
     for ax in axes:
-        ax.set_xlim(0, 3000)
+        ax.set_xlim(0, 6000)
         ax.set_ylim(0, 120)
 
     # Store all scatter artists and their corresponding data for hover
@@ -272,7 +272,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
         ax.grid(True, alpha=0.3)
 
     # shared labels
-    fig.supxlabel("VPD_mean (Pa)", fontsize=13)
+    fig.supxlabel("VPD_max (Pa)", fontsize=13)
     fig.supylabel("Daily wildfire count", fontsize=13, fontweight="bold")
 
     # ----- global legend for seasons + curve + threshold -----
@@ -347,7 +347,7 @@ def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
 
     # ===================================
 
-    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_quadratic.png"
+    out_path = BASE_DIR / "2_vpd_max_studies/fires_vs_vpd_max_quadratic.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=400)
     print(f"Saved seasonal quadratic log-log figure to: {out_path}")
@@ -360,7 +360,7 @@ def main():
     df = load_all_data()
 
     # --- USE ONLY FINITE, POSITIVE VPD VALUES ---
-    vpd_all = df["VPD_mean"].values.astype(float)
+    vpd_all = df["VPD_max"].values.astype(float)
     mask = np.isfinite(vpd_all) & (vpd_all > 0)
 
     valid_vpd = vpd_all[mask]

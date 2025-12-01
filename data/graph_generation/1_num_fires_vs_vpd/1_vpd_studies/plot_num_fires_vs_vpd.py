@@ -146,7 +146,7 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
             ax.scatter(
                 vpd_all[unused],
                 fires_all[unused],
-                s=18,
+                s=10,
                 alpha=0.15,
                 color=color,
                 edgecolors="none",
@@ -156,7 +156,7 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
             ax.scatter(
                 vpd_all[used],
                 fires_all[used],
-                s=22,
+                s=10,
                 alpha=0.95,
                 color=color,
                 edgecolors="none",
@@ -199,7 +199,7 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
 
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
 
-    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_powerlaw_seasonal.png"
+    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_powerlaw.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=400)
     print(f"Saved seasonal power-law figure to: {out_path}")
