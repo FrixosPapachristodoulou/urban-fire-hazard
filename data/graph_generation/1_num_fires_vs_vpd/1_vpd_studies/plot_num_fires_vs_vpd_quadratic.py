@@ -57,17 +57,13 @@ def load_all_data() -> pd.DataFrame:
     return df_all
 
 
-def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
+def fit_quadratic_loglog(vpd: np.ndarray, fires: np.ndarray):
     """
-    Fit a power law:
+    Fit a quadratic relation in log–log space:
 
-        NoF + 1 = a * VPD^b
+        log(NoF + 1) = c0 + c1*log(VPD) + c2*[log(VPD)]^2
 
-    by doing linear regression in log–log space:
-
-        ln(NoF + 1) = ln(a) + b * ln(VPD)
-
-    Returns a, b, R2 (computed in log space).
+    Returns (c2, c1, c0), R2   [np.polyfit order].
     """
     vpd = np.asarray(vpd, dtype=float)
     fires = np.asarray(fires, dtype=float)
@@ -77,26 +73,27 @@ def fit_power_law(vpd: np.ndarray, fires: np.ndarray):
     x = vpd[mask]
     y = fires[mask]
 
-    if len(x) < 2:
-        raise RuntimeError("Not enough data points for power law fit.")
+    if len(x) < 3:
+        raise RuntimeError("Not enough data points for quadratic log–log fit.")
 
     log_x = np.log(x)
     log_y = np.log(y + 1.0)   # include zero days
 
-    # ordinary least squares in log space
-    b, log_a = np.polyfit(log_x, log_y, 1)
-    a = np.exp(log_a)
+    # quadratic least squares in log space
+    # returns [c2, c1, c0]
+    coeffs = np.polyfit(log_x, log_y, 2)
+    c2, c1, c0 = coeffs
 
     # compute R^2 in log space
-    y_pred_log = log_a + b * log_x
+    y_pred_log = c2 * log_x**2 + c1 * log_x + c0
     ss_res = np.sum((log_y - y_pred_log) ** 2)
     ss_tot = np.sum((log_y - np.mean(log_y)) ** 2)
     r2 = 1.0 - ss_res / ss_tot
 
-    return a, b, r2
+    return coeffs, r2
 
 
-def plot_seasonal_power_laws(df: pd.DataFrame):
+def plot_seasonal_quadratic_loglog(df: pd.DataFrame):
     vpd_all = df["VPD_mean"].values.astype(float)
     fires_all = df["fire_count"].values.astype(float)
     seasons = df["season"].values
@@ -118,16 +115,24 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
         # which points actually participate in the fit?
         fit_mask = subset_mask & (vpd_all > 0) & ~np.isnan(fires_all)
 
-        # fit power law on the participating subset
+        # fit quadratic log-log on the participating subset
         vpd_fit_data = vpd_all[fit_mask]
         fires_fit_data = fires_all[fit_mask]
-        a_pl, b_pl, r2 = fit_power_law(vpd_fit_data, fires_fit_data)
+        coeffs, r2 = fit_quadratic_loglog(vpd_fit_data, fires_fit_data)
+        c2, c1, c0 = coeffs
 
         # X-range for curve in this subplot (based on used points)
-        vpd_min = np.nanmin(vpd_fit_data)
+        # Avoid tiny VPD values that cause log(VPD) → -∞ behaviour in quadratic fits
+        vpd_min_safe = max(np.nanpercentile(vpd_fit_data, 5), 20)  # clip at 20 Pa minimum
         vpd_max = np.nanmax(vpd_fit_data)
-        vpd_curve = np.linspace(vpd_min, vpd_max, 300)
-        fires_curve = a_pl * vpd_curve ** b_pl - 1.0
+
+        vpd_curve = np.linspace(vpd_min_safe, vpd_max, 300)
+
+
+        log_vpd_curve = np.log(vpd_curve)
+        log_fires_curve = c2 * log_vpd_curve**2 + c1 * log_vpd_curve + c0
+
+        fires_curve = np.exp(log_fires_curve) - 1.0
         fires_curve = np.clip(fires_curve, 0, None)
 
         # ---- scatter points by season with different alpha depending on fit participation ----
@@ -157,7 +162,7 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
                 edgecolors="none",
             )
 
-        # plot power-law curve
+        # plot quadratic log–log curve
         ax.plot(
             vpd_curve,
             fires_curve,
@@ -165,9 +170,21 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
             linewidth=2,
         )
 
+        # nice title with the quadratic relation in log–log space
+        season_title = r"$\mathbf{" + title.replace(" ", r"\ ") + "}$"
+        eq_line = (
+            r"$\ln(\mathrm{NoF}+1) = "
+            f"{c0:.2f}"
+            r" + "
+            f"{c1:.2f}"
+            r"\ln(\mathrm{VPD}) + "
+            f"{c2:.2f}"
+            r"[\ln(\mathrm{VPD})]^2$"
+        )
+        r2_line = rf"$\mathbf{{R^2 = {r2:.2f}}}$"
+
         ax.set_title(
-            f"$\\mathbf{{{title.replace(' ', '~')}}}$\n"
-            f"NoF + 1 = {a_pl:.2g} · VPD$^{{{b_pl:.2f}}}$,  $\\mathbf{{R^2 = {r2:.2f}}}$",
+            f"{season_title}\n{eq_line}\n{r2_line}",
             fontsize=11,
         )
         ax.grid(True, alpha=0.3)
@@ -175,13 +192,14 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
     # shared labels
     fig.supxlabel("VPD_mean (Pa)", fontsize=13)
     fig.supylabel("Daily wildfire count", fontsize=13, fontweight="bold")
+
     # ----- global legend for seasons + curve -----
     season_handles = [
         mlines.Line2D([], [], color=color, marker="o", linestyle="None",
                       label=season_name.capitalize())
         for season_name, color in SEASON_COLORS.items()
     ]
-    curve_handle = mlines.Line2D([], [], color="black", label="Power-law fit")
+    curve_handle = mlines.Line2D([], [], color="black", label="Quadratic log–log fit")
 
     fig.legend(
         handles=season_handles + [curve_handle],
@@ -193,10 +211,10 @@ def plot_seasonal_power_laws(df: pd.DataFrame):
 
     plt.tight_layout(rect=[0.03, 0.03, 1, 0.93])
 
-    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_powerlaw_seasonal.png"
+    out_path = BASE_DIR / "1_vpd_studies/fires_vs_vpd_quadratic_loglog_seasonal.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=400)
-    print(f"Saved seasonal power-law figure to: {out_path}")
+    print(f"Saved seasonal quadratic log–log figure to: {out_path}")
 
     plt.show()
 
@@ -205,8 +223,8 @@ def main():
     print("Loading merged weather and fire datasets...")
     df = load_all_data()
 
-    print("Plotting seasonal power-law fits...")
-    plot_seasonal_power_laws(df)
+    print("Plotting seasonal quadratic log–log fits...")
+    plot_seasonal_quadratic_loglog(df)
 
 
 if __name__ == "__main__":
